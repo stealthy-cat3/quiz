@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-ground">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0e0d">
+  <meta name="description" content="Reading Visual Art Reviewer: 115 questions with a review mode and a beat-the-clock game.">
+  <title>Reading Visual Art Reviewer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..700&display=swap" rel="stylesheet">
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body class="text-ink font-sans antialiased">
+  <!-- Drifting colour light behind everything -->
+  <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    <div class="absolute -top-40 -left-40 size-[480px] rounded-full bg-amber/20 blur-[120px] animate-drift-1"></div>
+    <div class="absolute top-1/3 -right-48 size-[520px] rounded-full bg-flame/20 blur-[130px] animate-drift-2"></div>
+    <div class="absolute -bottom-48 left-1/4 size-[460px] rounded-full bg-[#3d74b8]/20 blur-[120px] animate-drift-3"></div>
+  </div>
+
+  <div class="min-h-dvh flex flex-col">
+
+    <header class="w-full max-w-5xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-4">
+      <h1 class="text-lg font-semibold tracking-tight">
+        <button id="home" class="rounded-sm hover:text-amber transition-colors focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-amber">Reading Visual Art</button>
+      </h1>
+      <p id="hud" class="hidden text-sm text-muted tabular-nums">
+        Score <span id="score" class="inline-block text-amber font-semibold text-base">0</span>
+      </p>
+    </header>
+
+    <div id="strip" class="hidden w-full max-w-3xl mx-auto px-4 sm:px-8" aria-hidden="true">
+      <div id="strip-bars" class="flex gap-1 h-2"></div>
+    </div>
+
+    <main id="view" class="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-8 pt-6 sm:pt-12 pb-12"></main>
+
+    <footer class="w-full max-w-5xl mx-auto px-4 sm:px-8 py-6 text-xs text-faint">
+      Prepared by <span class="font-semibold bg-linear-to-r from-amber to-flame bg-clip-text text-transparent">Xavier</span>
+    </footer>
+  </div>
+
+</body>
+</html>

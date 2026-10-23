@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ground: #0f0e0d;
+  --color-surface: #1c1c1b;
+  --color-raised: #272726;
+  --color-lift: #333331;
+  --color-ink: #ededeb;
+  --color-muted: #b3b3b0;
+  --color-faint: #959592;
+  --color-amber: #f2a93b;
+  --color-amber-hi: #f7c46c;
+  --color-flame: #e4572e;
+  --color-bad: #f27a74;
+  --color-badbg: #2e1b19;
+
+  --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+
+  --animate-rise: rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-pop: pop 0.35s ease-out;
+  --animate-shine: shine 6s linear infinite;
+  --animate-shake: shake 0.4s ease-in-out;
+  --animate-glow: glow 1.6s ease-in-out infinite;
+  --animate-float-up: float-up 0.9s ease-out forwards;
+  --animate-drift-1: drift-1 18s ease-in-out infinite alternate;
+  --animate-drift-2: drift-2 22s ease-in-out infinite alternate;
+  --animate-drift-3: drift-3 26s ease-in-out infinite alternate;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(20px); }
+  }
+  @keyframes pop {
+    50% { transform: scale(1.3); }
+  }
+  @keyframes shine {
+    to { background-position: 200% center; }
+  }
+  @keyframes shake {
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+  }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 12px -2px rgb(242 169 59 / 0.35); }
+    50% { box-shadow: 0 0 28px 2px rgb(242 169 59 / 0.7); }
+  }
+  @keyframes float-up {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-48px); }
+  }
+  @keyframes drift-1 {
+    from { transform: translate(-10%, -10%) scale(1); }
+    to { transform: translate(40%, 25%) scale(1.3); }
+  }
+  @keyframes drift-2 {
+    from { transform: translate(15%, 0) scale(1.1); }
+    to { transform: translate(-35%, 30%) scale(0.85); }
+  }
+  @keyframes drift-3 {
+    from { transform: translate(0, 10%) scale(0.9); }
+    to { transform: translate(30%, -30%) scale(1.25); }
+  }
+}
+
+@layer base {
+  :root { color-scheme: dark; }
+  body { -webkit-tap-highlight-color: transparent; font-optical-sizing: auto; }
+  button:not(:disabled) { cursor: pointer; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
