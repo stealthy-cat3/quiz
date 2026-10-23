@@ -29,7 +29,7 @@ export function route(method, handler) {
   return async (req, res) => {
     if (req.method !== method) return send(res, 405, { error: 'Method not allowed' });
     if (missingDatabase) {
-      return send(res, 503, { error: 'The database is not connected yet. Add an Upstash Redis store to this Vercel project.' });
+      return send(res, 503, { error: 'The database is not connected yet. Connect an Upstash Redis store to this Vercel project, then redeploy.' });
     }
     try {
       await handler(req, res);

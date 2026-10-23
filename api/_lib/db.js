@@ -6,8 +6,16 @@ import { Redis } from '@upstash/redis';
 const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days, in seconds
 const BOARD = 'lb:clock';
 
-const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+// Vercel may add a custom prefix to these names (e.g. STORAGE_KV_REST_API_URL), so match by ending.
+const env = suffixes => {
+  for (const suffix of suffixes) {
+    const key = Object.keys(process.env).find(k => k.endsWith(suffix) && process.env[k]);
+    if (key) return process.env[key];
+  }
+  return undefined;
+};
+const url = env(['KV_REST_API_URL', 'UPSTASH_REDIS_REST_URL']);
+const token = env(['KV_REST_API_TOKEN', 'UPSTASH_REDIS_REST_TOKEN']);
 
 export const usingRedis = Boolean(url && token);
 // On Vercel each function call may run in a fresh copy, so the memory store would lose data at random.
