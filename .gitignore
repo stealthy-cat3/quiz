@@ -2,3 +2,5 @@ node_modules
 dist
 .taste-skill
 .omc
+.env*
+!.env.example

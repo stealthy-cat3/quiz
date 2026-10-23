@@ -40,21 +40,37 @@ const shuffle = a => {
 const $ = id => document.getElementById(id);
 const view = $('view'), hud = $('hud'), scoreEl = $('score'), strip = $('strip');
 
-const KEY = 'art-quiz-bee-v1';
-const BEST_KEY = 'art-quiz-bee-best';
 const AUTO_NEXT_MS = 1200;
 const CLOCK_MS = 60000;
 
-let mode = 'start'; // start | review | clock
+let user = null;    // { name, best, rank } from the server, or null when signed out
+let mode = 'start'; // auth | start | review | clock | board
 let state = null;   // review: { set: [question indices], pos, answers: { [qIndex]: chosen } }
 let game = null;    // clock
 let autoTimer = 0;
 
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
-const load = () => { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } };
-const clear = () => { try { localStorage.removeItem(KEY); } catch {} };
-const getBest = () => { try { return Number(localStorage.getItem(BEST_KEY)) || 0; } catch { return 0; } };
-const setBest = v => { try { localStorage.setItem(BEST_KEY, String(v)); } catch {} };
+// Review progress is kept per user on this device.
+const progressKey = () => `art-quiz-bee-v1:${user ? user.name.toLowerCase() : ''}`;
+const save = () => { try { localStorage.setItem(progressKey(), JSON.stringify(state)); } catch {} };
+const load = () => { try { return JSON.parse(localStorage.getItem(progressKey())); } catch { return null; } };
+const clear = () => { try { localStorage.removeItem(progressKey()); } catch {} };
+const getBest = () => (user && user.best) || 0;
+
+// JSON request to the API. Never throws: a network failure comes back as status 0.
+async function api(path, body) {
+  try {
+    const res = await fetch(`/api/${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin',
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch {
+    return { ok: false, status: 0, data: { error: 'Could not reach the server. Check your connection.' } };
+  }
+}
 
 const scoreOf = s => Object.entries(s.answers).filter(([i, a]) => questions[i].answer === a).length;
 
@@ -67,6 +83,9 @@ function setChrome(screen) {
   const inReview = screen === 'review';
   hud.classList.toggle('hidden', !(inReview || screen === 'result'));
   strip.classList.toggle('hidden', !inReview);
+  $('account').classList.toggle('hidden', !user);
+  $('account').classList.toggle('flex', !!user);
+  if (user) $('account-name').textContent = user.name;
 }
 
 function rise(el, i) {
@@ -161,8 +180,158 @@ function partStyle(p) {
   return `--part:${p.bg};--part-ink:${p.ink}`;
 }
 
+// ---------- Sign in / create account ----------
+const INPUT = 'w-full min-h-12 px-4 rounded-xl bg-ground/60 border border-white/10 text-base text-ink outline-none transition focus:border-amber focus:shadow-[0_0_0_4px_rgba(242,169,59,.15)]';
+
+function renderAuth(tab = 'login', message = '', typedName = '') {
+  stopAll();
+  mode = 'auth';
+  user = null;
+  setChrome('auth');
+  const isLogin = tab === 'login';
+  const tabCls = on => on
+    ? 'bg-linear-to-r from-amber to-amber-hi text-ground shadow-[0_0_20px_-4px_rgba(242,169,59,.7)]'
+    : 'text-muted hover:text-ink';
+
+  view.innerHTML = `
+    <div class="grid lg:grid-cols-2 gap-10 lg:gap-16 lg:items-center">
+      <section>
+        <h2 class="text-[42px] leading-[0.95] sm:text-[72px] font-semibold tracking-[-0.04em] text-balance pb-2
+                   bg-linear-to-r from-ink via-amber to-flame bg-[length:200%_auto] bg-clip-text text-transparent animate-shine">Reading Visual Art Reviewer</h2>
+        <p class="mt-6 text-lg sm:text-xl max-w-[42ch] leading-relaxed text-muted">
+          115 questions on art. Sign in to review, race the clock and get your name on the leaderboard.
+        </p>
+      </section>
+
+      <section class="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[.04] backdrop-blur-md p-6 sm:p-8">
+        <span class="absolute -top-24 -right-24 size-64 rounded-full bg-amber/25 blur-3xl"></span>
+        <div role="tablist" class="relative grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/[.06]">
+          <button role="tab" aria-selected="${isLogin}" data-tab="login" class="min-h-11 rounded-lg font-semibold transition ${tabCls(isLogin)}">Sign in</button>
+          <button role="tab" aria-selected="${!isLogin}" data-tab="signup" class="min-h-11 rounded-lg font-semibold transition ${tabCls(!isLogin)}">Create account</button>
+        </div>
+
+        <form id="auth-form" class="relative mt-6 grid gap-4" novalidate>
+          <label class="grid gap-1.5">
+            <span class="text-sm text-muted">Username</span>
+            <input name="username" value="${esc(typedName)}" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" required class="${INPUT}">
+          </label>
+          <label class="grid gap-1.5">
+            <span class="text-sm text-muted">Password</span>
+            <input name="password" type="password" autocomplete="${isLogin ? 'current-password' : 'new-password'}" maxlength="100" required class="${INPUT}">
+          </label>
+          ${isLogin ? '' : '<p class="text-sm text-faint">3 to 20 letters, numbers or underscores. Password at least 6 characters.</p>'}
+          <p id="auth-error" role="alert" class="min-h-5 text-sm text-bad">${esc(message)}</p>
+          <button type="submit" class="${BTN_PRIMARY} w-full">${isLogin ? 'Sign in' : 'Create account'}</button>
+        </form>
+      </section>
+    </div>`;
+
+  view.querySelectorAll(':scope > div > section').forEach(rise);
+  const form = $('auth-form');
+  view.querySelectorAll('[data-tab]').forEach(b => {
+    b.onclick = () => renderAuth(b.dataset.tab, '', form.username.value);
+  });
+  form[typedName ? 'password' : 'username'].focus({ preventScroll: true });
+
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = form.querySelector('[type="submit"]');
+    const username = form.username.value.trim();
+    const password = form.password.value;
+    if (!username || !password) { $('auth-error').textContent = 'Enter a username and a password.'; return; }
+    btn.disabled = true;
+    btn.textContent = isLogin ? 'Signing in…' : 'Creating account…';
+    const r = await api(isLogin ? 'login' : 'signup', { username, password });
+    if (r.ok) {
+      user = r.data.user;
+      renderStart();
+    } else {
+      $('auth-error').textContent = r.data.error || 'Something went wrong. Try again.';
+      btn.disabled = false;
+      btn.textContent = isLogin ? 'Sign in' : 'Create account';
+      form.password.select();
+    }
+  };
+}
+
+async function logout() {
+  stopAll();
+  await api('logout', {});
+  state = null;
+  renderAuth();
+}
+
+function signedOut() {
+  renderAuth('login', 'Your session ended. Sign in again.');
+}
+
+// ---------- Leaderboard ----------
+const MEDALS = [
+  'bg-linear-to-br from-amber-hi to-amber text-ground shadow-[0_0_18px_rgba(242,169,59,.65)]',
+  'bg-linear-to-br from-white to-[#9a9a9a] text-ground',
+  'bg-linear-to-br from-[#e6a774] to-[#9c5a2c] text-ground',
+];
+
+function boardMarkup({ top, me }, gap = 'mt-16') {
+  const mine = name => user && name.toLowerCase() === user.name.toLowerCase();
+  return `
+    <section class="${gap}">
+      <div class="flex items-baseline justify-between gap-4">
+        <h2 class="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h2>
+        <p class="text-sm text-muted">Beat the clock · top 20</p>
+      </div>
+      ${top.length ? `
+        <ol class="mt-5 grid gap-2">
+          ${top.map((row, i) => `
+            <li class="lb-row flex items-center gap-4 rounded-xl border px-4 py-3 backdrop-blur-sm ${mine(row.name)
+              ? 'border-amber/60 bg-amber/10 shadow-[0_0_28px_-8px_rgba(242,169,59,.75)]'
+              : 'border-white/10 bg-white/[.04]'}">
+              <span class="size-9 shrink-0 grid place-items-center rounded-full text-sm font-bold tabular-nums ${MEDALS[i] || 'bg-white/10 text-muted'}">${i + 1}</span>
+              <span class="flex-1 min-w-0 truncate font-semibold">${esc(row.name)}${mine(row.name) ? '<span class="ml-2 text-xs text-amber">You</span>' : ''}</span>
+              <span class="tabular-nums font-semibold">${row.score.toLocaleString()}</span>
+            </li>`).join('')}
+        </ol>` : `
+        <p class="mt-5 rounded-xl border border-white/10 bg-white/[.04] px-4 py-6 text-muted">No scores yet. Play Beat the clock to take first place.</p>`}
+      ${me && me.rank > top.length
+        ? `<p class="mt-3 text-muted">You're <span class="text-amber font-semibold">#${me.rank}</span> with ${me.score.toLocaleString()}.</p>`
+        : ''}
+      ${!me && top.length ? '<p class="mt-3 text-muted">You\'re not on the board yet. Play Beat the clock to get on it.</p>' : ''}
+    </section>`;
+}
+
+async function mountBoard(slot, gap) {
+  slot.innerHTML = `<p class="${gap || 'mt-16'} text-muted animate-pulse">Loading the leaderboard…</p>`;
+  const r = await api('leaderboard');
+  if (!slot.isConnected) return;
+  if (r.status === 401) return signedOut();
+  if (!r.ok) {
+    slot.innerHTML = `<p class="${gap || 'mt-16'} text-bad">${esc(r.data.error || 'Could not load the leaderboard.')}</p>`;
+    return;
+  }
+  slot.innerHTML = boardMarkup(r.data, gap);
+  slot.querySelectorAll('.lb-row').forEach((li, i) => rise(li, i));
+}
+
+function renderBoard() {
+  stopAll();
+  mode = 'board';
+  setChrome('board');
+  view.innerHTML = `
+    <div class="max-w-3xl mx-auto">
+      <div id="lb-slot"></div>
+      <div class="mt-10 flex flex-col sm:flex-row gap-3">
+        <button data-act="clock" class="${BTN_PRIMARY}">Play Beat the clock</button>
+        <button data-act="home" class="${BTN_GHOST}">Back to start</button>
+      </div>
+    </div>`;
+  mountBoard($('lb-slot'), 'mt-0');
+  view.querySelector('[data-act="clock"]').onclick = startClock;
+  view.querySelector('[data-act="home"]').onclick = renderStart;
+}
+
 // ---------- Start ----------
 function renderStart() {
+  if (!user) return renderAuth();
   stopAll();
   mode = 'start';
   setChrome('start');
@@ -418,6 +587,8 @@ function renderResult() {
         <button data-act="home" class="${BTN_GHOST}">Choose a part</button>
       </div>
 
+      <div id="lb-slot"></div>
+
       ${missed.length ? missedList(missed) : ''}
     </div>`;
 
@@ -431,6 +602,7 @@ function renderResult() {
   view.querySelector('[data-act="again"]').onclick = () => beginReview(set);
   view.querySelector('[data-act="clock"]').onclick = startClock;
   view.querySelector('[data-act="home"]').onclick = renderStart;
+  mountBoard($('lb-slot'));
   clear();
 }
 
@@ -560,7 +732,6 @@ function endClock() {
   cancelAnimationFrame(game.raf);
   const prev = getBest();
   const isBest = game.score > prev;
-  if (isBest) setBest(game.score);
   const answered = game.right + game.wrong;
   const acc = answered ? Math.round(game.right / answered * 100) : 0;
   const seen = new Set();
@@ -575,6 +746,7 @@ function endClock() {
         ${isBest
           ? `<p class="mt-2 inline-block rounded-full px-4 py-1.5 font-semibold text-ground bg-linear-to-r from-amber to-flame animate-glow">New best score!</p>`
           : `<p class="mt-2 text-lg text-muted tabular-nums">Your best is ${prev.toLocaleString()}</p>`}
+        <p id="save-status" class="mt-3 text-sm text-muted" aria-live="polite">Saving your score…</p>
       </section>
 
       <section class="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -590,6 +762,8 @@ function endClock() {
         <button data-act="home" class="${BTN_GHOST}">Back to start</button>
       </div>
 
+      <div id="lb-slot"></div>
+
       ${missed.length ? missedList(missed) : ''}
     </div>`;
 
@@ -597,6 +771,23 @@ function endClock() {
   countUp($('final'), game.score);
   view.querySelector('[data-act="again"]').onclick = startClock;
   view.querySelector('[data-act="home"]').onclick = renderStart;
+
+  // Save the score first, so the leaderboard below already includes it.
+  const slot = $('lb-slot');
+  api('scores', { score: game.score }).then(r => {
+    if (!slot.isConnected) return;
+    if (r.status === 401) return signedOut();
+    const status = $('save-status');
+    if (r.ok) {
+      user.best = r.data.best;
+      user.rank = r.data.rank;
+      status.textContent = r.data.rank ? `Saved. You're #${r.data.rank} on the leaderboard.` : 'Saved.';
+    } else {
+      status.textContent = r.data.error || 'Your score could not be saved.';
+      status.className = 'mt-3 text-sm text-bad';
+    }
+    mountBoard(slot);
+  });
 }
 
 // ---------- Keyboard: 1-4 or A-D to answer, Enter for next ----------
@@ -618,5 +809,18 @@ document.addEventListener('keydown', e => {
 });
 
 $('home').onclick = renderStart;
+$('lb-btn').onclick = renderBoard;
+$('logout-btn').onclick = logout;
 
-renderStart();
+async function boot() {
+  view.innerHTML = '<p class="text-muted animate-pulse">Loading…</p>';
+  const r = await api('me');
+  if (r.ok) {
+    user = r.data.user;
+    renderStart();
+  } else {
+    renderAuth('login', r.status === 401 ? '' : r.data.error);
+  }
+}
+
+boot();
