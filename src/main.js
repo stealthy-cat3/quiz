@@ -43,7 +43,7 @@ const view = $('view'), hud = $('hud'), scoreEl = $('score'), strip = $('strip')
 const AUTO_NEXT_MS = 1200;
 const CLOCK_MS = 60000;
 
-let user = null;    // { name, best, rank } from the server, or null when signed out
+let user = null;    // { name } of the current player, or null before a name is entered
 let mode = 'start'; // auth | start | review | clock | board
 let state = null;   // review: { set: [question indices], pos, answers: { [qIndex]: chosen } }
 let game = null;    // clock
@@ -54,23 +54,35 @@ const progressKey = () => `art-quiz-bee-v1:${user ? user.name.toLowerCase() : ''
 const save = () => { try { localStorage.setItem(progressKey(), JSON.stringify(state)); } catch {} };
 const load = () => { try { return JSON.parse(localStorage.getItem(progressKey())); } catch { return null; } };
 const clear = () => { try { localStorage.removeItem(progressKey()); } catch {} };
-const getBest = () => (user && user.best) || 0;
+// The player's name and the leaderboard live in this browser only.
+const NAME_KEY = 'rvar-player';
+const BOARD_KEY = 'rvar-board';
+const BOARD_SIZE = 20;
+const NAME_RE = /^.{1,20}$/u;
 
-// JSON request to the API. Never throws: a network failure comes back as status 0.
-async function api(path, body) {
-  try {
-    const res = await fetch(`/api/${path}`, {
-      method: body ? 'POST' : 'GET',
-      headers: body ? { 'Content-Type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin',
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
-  } catch {
-    return { ok: false, status: 0, data: { error: 'Could not reach the server. Check your connection.' } };
-  }
+const readJSON = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
+const writeJSON = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+
+// Best score per player, highest first: [{ name, score }]
+const readBoard = () => readJSON(BOARD_KEY, []).filter(r => r && typeof r.name === 'string' && Number.isFinite(r.score));
+
+function standing(name) {
+  const i = readBoard().findIndex(r => sameName(r.name, name));
+  return i < 0 ? null : { rank: i + 1, score: readBoard()[i].score };
 }
+
+// Keeps the higher of the player's old and new score; returns their standing.
+function submitScore(name, score) {
+  const board = readBoard();
+  const row = board.find(r => sameName(r.name, name));
+  if (row) { row.score = Math.max(row.score, score); row.name = name; } else board.push({ name, score });
+  board.sort((a, b) => b.score - a.score);
+  writeJSON(BOARD_KEY, board);
+  return standing(name);
+}
+
+const getBest = () => (user && standing(user.name)?.score) || 0;
 
 const scoreOf = s => Object.entries(s.answers).filter(([i, a]) => questions[i].answer === a).length;
 
@@ -180,18 +192,15 @@ function partStyle(p) {
   return `--part:${p.bg};--part-ink:${p.ink}`;
 }
 
-// ---------- Sign in / create account ----------
+// ---------- Name entry ----------
 const INPUT = 'w-full min-h-12 px-4 rounded-xl bg-ground/60 border border-white/10 text-base text-ink outline-none transition focus:border-amber focus:shadow-[0_0_0_4px_rgba(242,169,59,.15)]';
 
-function renderAuth(tab = 'login', message = '', typedName = '') {
+function renderEntry() {
   stopAll();
-  mode = 'auth';
+  mode = 'entry';
   user = null;
-  setChrome('auth');
-  const isLogin = tab === 'login';
-  const tabCls = on => on
-    ? 'bg-linear-to-r from-amber to-amber-hi text-ground shadow-[0_0_20px_-4px_rgba(242,169,59,.7)]'
-    : 'text-muted hover:text-ink';
+  setChrome('entry');
+  const players = readBoard().slice(0, 6);
 
   view.innerHTML = `
     <div class="grid lg:grid-cols-2 gap-10 lg:gap-16 lg:items-center">
@@ -199,70 +208,55 @@ function renderAuth(tab = 'login', message = '', typedName = '') {
         <h2 class="text-[42px] leading-[0.95] sm:text-[72px] font-semibold tracking-[-0.04em] text-balance pb-2
                    bg-linear-to-r from-ink via-amber to-flame bg-[length:200%_auto] bg-clip-text text-transparent animate-shine">Reading Visual Art Reviewer</h2>
         <p class="mt-6 text-lg sm:text-xl max-w-[42ch] leading-relaxed text-muted">
-          115 questions on art. Sign in to review, race the clock and get your name on the leaderboard.
+          115 questions on art. Enter your name to review, race the clock and get on the leaderboard.
         </p>
       </section>
 
       <section class="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[.04] backdrop-blur-md p-6 sm:p-8">
         <span class="absolute -top-24 -right-24 size-64 rounded-full bg-amber/25 blur-3xl"></span>
-        <div role="tablist" class="relative grid grid-cols-2 gap-1 p-1 rounded-xl bg-white/[.06]">
-          <button role="tab" aria-selected="${isLogin}" data-tab="login" class="min-h-11 rounded-lg font-semibold transition ${tabCls(isLogin)}">Sign in</button>
-          <button role="tab" aria-selected="${!isLogin}" data-tab="signup" class="min-h-11 rounded-lg font-semibold transition ${tabCls(!isLogin)}">Create account</button>
-        </div>
-
-        <form id="auth-form" class="relative mt-6 grid gap-4" novalidate>
+        <form id="entry-form" class="relative grid gap-4" novalidate>
           <label class="grid gap-1.5">
-            <span class="text-sm text-muted">Username</span>
-            <input name="username" value="${esc(typedName)}" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="20" required class="${INPUT}">
+            <span class="text-lg font-semibold">What's your name?</span>
+            <input name="name" autocomplete="nickname" spellcheck="false" maxlength="20" required placeholder="Your name" class="${INPUT} placeholder:text-faint">
           </label>
-          <label class="grid gap-1.5">
-            <span class="text-sm text-muted">Password</span>
-            <input name="password" type="password" autocomplete="${isLogin ? 'current-password' : 'new-password'}" maxlength="100" required class="${INPUT}">
-          </label>
-          ${isLogin ? '' : '<p class="text-sm text-faint">3 to 20 letters, numbers or underscores. Password at least 6 characters.</p>'}
-          <p id="auth-error" role="alert" class="min-h-5 text-sm text-bad">${esc(message)}</p>
-          <button type="submit" class="${BTN_PRIMARY} w-full">${isLogin ? 'Sign in' : 'Create account'}</button>
+          <p id="entry-error" role="alert" class="min-h-5 text-sm text-bad"></p>
+          <button type="submit" class="${BTN_PRIMARY} w-full">Start <span class="transition-transform group-hover:translate-x-1" aria-hidden="true">&rarr;</span></button>
         </form>
+        ${players.length ? `
+          <div class="relative mt-6">
+            <p class="text-sm text-muted">Played here before? Pick your name:</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              ${players.map(p => `<button type="button" data-name="${esc(p.name)}" class="min-h-10 px-3 rounded-full border border-white/10 bg-white/[.06] text-sm font-semibold hover:border-amber/60 hover:text-amber transition">${esc(p.name)}</button>`).join('')}
+            </div>
+          </div>` : ''}
       </section>
     </div>`;
 
   view.querySelectorAll(':scope > div > section').forEach(rise);
-  const form = $('auth-form');
-  view.querySelectorAll('[data-tab]').forEach(b => {
-    b.onclick = () => renderAuth(b.dataset.tab, '', form.username.value);
-  });
-  form[typedName ? 'password' : 'username'].focus({ preventScroll: true });
+  const form = $('entry-form');
+  form.name.focus({ preventScroll: true });
 
-  form.onsubmit = async e => {
-    e.preventDefault();
-    const btn = form.querySelector('[type="submit"]');
-    const username = form.username.value.trim();
-    const password = form.password.value;
-    if (!username || !password) { $('auth-error').textContent = 'Enter a username and a password.'; return; }
-    btn.disabled = true;
-    btn.textContent = isLogin ? 'Signing in…' : 'Creating account…';
-    const r = await api(isLogin ? 'login' : 'signup', { username, password });
-    if (r.ok) {
-      user = r.data.user;
-      renderStart();
-    } else {
-      $('auth-error').textContent = r.data.error || 'Something went wrong. Try again.';
-      btn.disabled = false;
-      btn.textContent = isLogin ? 'Sign in' : 'Create account';
-      form.password.select();
-    }
+  const enter = name => {
+    user = { name };
+    writeJSON(NAME_KEY, name);
+    renderStart();
   };
+  form.onsubmit = e => {
+    e.preventDefault();
+    const name = form.name.value.trim().replace(/\s+/g, ' ');
+    if (!NAME_RE.test(name)) { $('entry-error').textContent = 'Enter a name, up to 20 characters.'; return; }
+    // Reuse the spelling already on the board, so "maria" and "Maria" are one player.
+    const known = readBoard().find(r => sameName(r.name, name));
+    enter(known ? known.name : name);
+  };
+  view.querySelectorAll('[data-name]').forEach(b => { b.onclick = () => enter(b.dataset.name); });
 }
 
-async function logout() {
+function switchPlayer() {
   stopAll();
-  await api('logout', {});
   state = null;
-  renderAuth();
-}
-
-function signedOut() {
-  renderAuth('login', 'Your session ended. Sign in again.');
+  try { localStorage.removeItem(NAME_KEY); } catch {}
+  renderEntry();
 }
 
 // ---------- Leaderboard ----------
@@ -278,7 +272,7 @@ function boardMarkup({ top, me }, gap = 'mt-16') {
     <section class="${gap}">
       <div class="flex items-baseline justify-between gap-4">
         <h2 class="text-2xl sm:text-3xl font-semibold tracking-tight">Leaderboard</h2>
-        <p class="text-sm text-muted">Beat the clock · top 20</p>
+        <p class="text-sm text-muted">Beat the clock · on this device</p>
       </div>
       ${top.length ? `
         <ol class="mt-5 grid gap-2">
@@ -299,16 +293,9 @@ function boardMarkup({ top, me }, gap = 'mt-16') {
     </section>`;
 }
 
-async function mountBoard(slot, gap) {
-  slot.innerHTML = `<p class="${gap || 'mt-16'} text-muted animate-pulse">Loading the leaderboard…</p>`;
-  const r = await api('leaderboard');
-  if (!slot.isConnected) return;
-  if (r.status === 401) return signedOut();
-  if (!r.ok) {
-    slot.innerHTML = `<p class="${gap || 'mt-16'} text-bad">${esc(r.data.error || 'Could not load the leaderboard.')}</p>`;
-    return;
-  }
-  slot.innerHTML = boardMarkup(r.data, gap);
+function mountBoard(slot, gap) {
+  const data = { top: readBoard().slice(0, BOARD_SIZE), me: user ? standing(user.name) : null };
+  slot.innerHTML = boardMarkup(data, gap);
   slot.querySelectorAll('.lb-row').forEach((li, i) => rise(li, i));
 }
 
@@ -331,7 +318,7 @@ function renderBoard() {
 
 // ---------- Start ----------
 function renderStart() {
-  if (!user) return renderAuth();
+  if (!user) return renderEntry();
   stopAll();
   mode = 'start';
   setChrome('start');
@@ -772,22 +759,15 @@ function endClock() {
   view.querySelector('[data-act="again"]').onclick = startClock;
   view.querySelector('[data-act="home"]').onclick = renderStart;
 
-  // Save the score first, so the leaderboard below already includes it.
-  const slot = $('lb-slot');
-  api('scores', { score: game.score }).then(r => {
-    if (!slot.isConnected) return;
-    if (r.status === 401) return signedOut();
-    const status = $('save-status');
-    if (r.ok) {
-      user.best = r.data.best;
-      user.rank = r.data.rank;
-      status.textContent = r.data.rank ? `Saved. You're #${r.data.rank} on the leaderboard.` : 'Saved.';
-    } else {
-      status.textContent = r.data.error || 'Your score could not be saved.';
-      status.className = 'mt-3 text-sm text-bad';
-    }
-    mountBoard(slot);
-  });
+  // Save the score first, so the leaderboard below already includes it. A zero is not worth a row.
+  const status = $('save-status');
+  if (game.score > 0) {
+    const s = submitScore(user.name, game.score);
+    status.textContent = `Saved. You're #${s.rank} on this device's leaderboard.`;
+  } else {
+    status.textContent = 'Score a point to get on the leaderboard.';
+  }
+  mountBoard($('lb-slot'));
 }
 
 // ---------- Keyboard: 1-4 or A-D to answer, Enter for next ----------
@@ -810,17 +790,13 @@ document.addEventListener('keydown', e => {
 
 $('home').onclick = renderStart;
 $('lb-btn').onclick = renderBoard;
-$('logout-btn').onclick = logout;
+$('logout-btn').onclick = switchPlayer;
 
-async function boot() {
-  view.innerHTML = '<p class="text-muted animate-pulse">Loading…</p>';
-  const r = await api('me');
-  if (r.ok) {
-    user = r.data.user;
-    renderStart();
-  } else {
-    renderAuth('login', r.status === 401 ? '' : r.data.error);
-  }
+// Returning players skip the name screen.
+const savedName = readJSON(NAME_KEY, null);
+if (typeof savedName === 'string' && NAME_RE.test(savedName)) {
+  user = { name: savedName };
+  renderStart();
+} else {
+  renderEntry();
 }
-
-boot();
